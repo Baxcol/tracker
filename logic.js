@@ -210,32 +210,49 @@
     return { from: from, to: to, end: end, days: days.length, acts: acts, kinds: kinds, okDays: okDays, reqDays: reqDays };
   }
 
-  /* ---------- ряд для графика ---------- */
-  function series(state, idx, from, to, kind, mode) {
-    var acts = state.activities.filter(function (a) { return kind === 'all' || a.kind === kind; });
-    var buckets = [], i;
-    if (mode === 'day') {
-      range(from, to).forEach(function (d) { buckets.push({ key: d, from: d, to: d }); });
-    } else {
-      var s = weekStart(from);
-      while (s <= to) { buckets.push({ key: s, from: s, to: addDays(s, 6) }); s = addDays(s, 7); }
-      if (buckets.length > 30) buckets = buckets.slice(buckets.length - 30);
+  /* ---------- календарь ---------- */
+  // сетка месяца: недели с понедельника, 6 строк (или 5, если последняя пустая)
+  function monthGrid(k) {
+    var first = monthStart(k), s = weekStart(first), out = [];
+    for (var i = 0; i < 42; i++) {
+      var key = addDays(s, i);
+      out.push({ key: key, inMonth: key.slice(0, 7) === first.slice(0, 7) });
     }
-    var used = {};
+    var tail = out.slice(35).some(function (c) { return c.inMonth; });
+    return tail ? out : out.slice(0, 35);
+  }
+
+  // '' — нет обязательных пунктов или день в будущем; 'ok' — минимум выполнен;
+  // 'miss' — день прошёл без минимума; 'open' — сегодня ещё не выполнен
+  function dayStatus(state, idx, day, todayKey) {
+    if (day > todayKey) return '';
+    var c = dayComplete(state, idx, day);
+    if (c === null) return '';
+    if (c) return 'ok';
+    return day < todayKey ? 'miss' : 'open';
+  }
+
+  function fmtDate(k) { var d = parseKey(k); return d.getDate() + ' ' + MONTHS_S[d.getMonth()] + ' ' + d.getFullYear(); }
+
+  /* ---------- построчная разбивка периода (текстом, вместо графика) ---------- */
+  function breakdown(state, idx, from, to, kind, unit, todayKey) {
+    var end = minKey(to, todayKey), rows = [];
+    if (from > end) return rows;
+    var buckets = [], s;
+    if (unit === 'day') {
+      range(from, end).forEach(function (d) { buckets.push({ from: d, to: d }); });
+    } else {
+      s = weekStart(from);
+      while (s <= end) { buckets.push({ from: maxKey(s, from), to: minKey(addDays(s, 6), end) }); s = addDays(s, 7); }
+    }
     buckets.forEach(function (b) {
-      b.parts = {}; b.total = 0;
-      range(maxKey(b.from, from), minKey(b.to, to)).forEach(function (d) {
-        for (i = 0; i < acts.length; i++) {
-          var r = rec(idx, d, acts[i].id);
-          if (r.m > 0) {
-            b.parts[acts[i].id] = (b.parts[acts[i].id] || 0) + r.m;
-            b.total += r.m;
-            used[acts[i].id] = true;
-          }
-        }
+      var r = report(state, idx, b.from, b.to, todayKey), g = r.kinds[kind];
+      rows.push({
+        from: b.from, to: b.to, minutes: g.minutes, pctSum: g.pctSum, okDays: r.okDays, reqDays: r.reqDays,
+        status: unit === 'day' ? dayStatus(state, idx, b.from, todayKey) : ''
       });
     });
-    return { buckets: buckets, acts: acts.filter(function (a) { return used[a.id]; }) };
+    return rows;
   }
 
   /* ---------- навигация по периодам ---------- */
@@ -267,7 +284,8 @@
     weekStart: weekStart, monthStart: monthStart, monthEnd: monthEnd, range: range,
     fmtMin: fmtMin, fmtPct: fmtPct, dayLabel: dayLabel,
     index: index, rec: rec, dayComplete: dayComplete, dayInfo: dayInfo, weekCount: weekCount,
-    streaks: streaks, report: report, series: series,
+    streaks: streaks, report: report, breakdown: breakdown,
+    monthGrid: monthGrid, dayStatus: dayStatus, fmtDate: fmtDate,
     periodRange: periodRange, shiftAnchor: shiftAnchor, periodLabel: periodLabel
   };
 });

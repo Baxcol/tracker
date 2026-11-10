@@ -1,9 +1,15 @@
-/* Офлайн-режим: сначала берём файлы из кэша, при выходе новой версии меняем CACHE. */
-const CACHE = 'habitstudy-v1';
+/* Офлайн-режим. Файлы отдаются из кэша сразу, а в фоне обновляются,
+   поэтому новая версия появляется при следующем открытии приложения.
+   При большом обновлении можно поменять номер в CACHE. */
+const CACHE = 'habitstudy-v2';
 const FILES = ['./', 'index.html', 'style.css', 'logic.js', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(FILES.map((f) => c.add(new Request(f, { cache: 'reload' })))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -15,12 +21,16 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      if (res && res.ok && new URL(e.request.url).origin === location.origin) {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
-      }
-      return res;
-    }).catch(() => caches.match('index.html')))
+    caches.match(e.request, { ignoreSearch: true }).then((hit) => {
+      const net = fetch(e.request, { cache: 'no-cache' }).then((res) => {
+        if (res && res.ok && new URL(e.request.url).origin === location.origin) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
+        return res;
+      }).catch(() => hit || caches.match('index.html'));
+      if (hit) { e.waitUntil(net.catch(() => {})); return hit; }
+      return net;
+    })
   );
 });
